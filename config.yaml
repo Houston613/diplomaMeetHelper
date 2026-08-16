@@ -1,0 +1,6 @@
+db:
+  dsn: "postgres://postgres:postgrespassword@localhost:5432/meethelper?sslmode=disable&search_path=meethelper"
+
+log:
+  level: "info"
+  format: "console"
