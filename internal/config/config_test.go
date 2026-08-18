@@ -3,6 +3,7 @@ package config_test
 import (
 	"os"
 	"testing"
+	"time"
 
 	"diplomaMeetHelper/internal/config"
 )
@@ -13,6 +14,12 @@ func TestConfig_DefaultValues(t *testing.T) {
 		t.Fatalf("expected no error loading defaults, got: %v", err)
 	}
 
+	if cfg.App.Workers != 3 {
+		t.Errorf("expected 3 workers by default, got %d", cfg.App.Workers)
+	}
+	if cfg.App.JobTimeout != 120*time.Second {
+		t.Errorf("expected 120s timeout by default, got %v", cfg.App.JobTimeout)
+	}
 	if cfg.DB.DSN == "" {
 		t.Errorf("expected non-empty default DSN")
 	}
@@ -39,6 +46,20 @@ func TestConfig_Validation(t *testing.T) {
 			},
 			wantErr: true,
 		},
+		{
+			name: "zero workers",
+			mutate: func(c *config.Config) {
+				c.App.Workers = 0
+			},
+			wantErr: true,
+		},
+		{
+			name: "negative timeout",
+			mutate: func(c *config.Config) {
+				c.App.JobTimeout = -10 * time.Second
+			},
+			wantErr: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -58,8 +79,10 @@ func TestConfig_Validation(t *testing.T) {
 }
 
 func TestConfig_EnvOverride(t *testing.T) {
+	_ = os.Setenv("APP_WORKERS", "8")
 	_ = os.Setenv("LOG_LEVEL", "debug")
 	defer func() {
+		_ = os.Unsetenv("APP_WORKERS")
 		_ = os.Unsetenv("LOG_LEVEL")
 	}()
 
@@ -68,6 +91,9 @@ func TestConfig_EnvOverride(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
+	if cfg.App.Workers != 8 {
+		t.Errorf("expected 8 workers from env APP_WORKERS, got %d", cfg.App.Workers)
+	}
 	if cfg.Log.Level != "debug" {
 		t.Errorf("expected debug log level from env LOG_LEVEL, got %s", cfg.Log.Level)
 	}
