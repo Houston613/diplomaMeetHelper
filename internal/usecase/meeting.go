@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"diplomaMeetHelper/internal/domain"
@@ -67,6 +68,13 @@ func (u *MeetingUsecase) LoadMeeting(ctx context.Context, userID string, filePat
 		return uuid.Nil, fmt.Errorf("failed to access file %s: %w", filePath, err)
 	}
 
+	ext := strings.ToLower(filepath.Ext(filePath))
+	switch ext {
+	case ".mp3", ".wav", ".txt", ".json":
+	default:
+		return uuid.Nil, domain.ErrUnsupportedFormat
+	}
+
 	filename := filepath.Base(filePath)
 	now := time.Now()
 	meetingID := uuid.New()
@@ -116,7 +124,16 @@ func (u *MeetingUsecase) ListMeetings(ctx context.Context, userID string) ([]dom
 }
 
 func (u *MeetingUsecase) GetMeetingDetails(ctx context.Context, userID string, meetingID uuid.UUID) (*domain.MeetingDetails, error) {
-	return u.meetingRepo.GetMeetingDetails(ctx, meetingID, userID)
+	details, err := u.meetingRepo.GetMeetingDetails(ctx, meetingID, userID)
+	if err != nil {
+		return nil, err
+	}
+
+	if details.Meeting.Status != domain.StatusCompleted {
+		return nil, domain.ErrJobNotCompleted
+	}
+
+	return details, nil
 }
 
 func ProcessJobHandler(

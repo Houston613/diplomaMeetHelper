@@ -2,6 +2,7 @@ package workerpool_test
 
 import (
 	"context"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -41,4 +42,28 @@ func TestWorkerPool_ConcurrentProcessing(t *testing.T) {
 	if int(processed.Load()) != totalJobs {
 		t.Errorf("expected %d jobs processed, got %d", totalJobs, processed.Load())
 	}
+}
+
+func TestWorkerPool_ConcurrentSubmitAndStop_NoPanic(t *testing.T) {
+	handler := func(ctx context.Context, job domain.ProcessingJob) error {
+		return nil
+	}
+
+	pool := workerpool.New(4, 100, 1*time.Second, handler, zap.NewNop())
+	pool.Start()
+
+	var wg sync.WaitGroup
+	for i := 0; i < 20; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < 100; j++ {
+				_ = pool.Submit(domain.ProcessingJob{ID: uuid.New()})
+			}
+		}()
+	}
+
+	time.Sleep(1 * time.Millisecond)
+	pool.Stop(1 * time.Second)
+	wg.Wait()
 }

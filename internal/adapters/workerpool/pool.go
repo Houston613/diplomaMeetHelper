@@ -20,8 +20,10 @@ type WorkerPool struct {
 	jobQueue   chan domain.ProcessingJob
 	handler    JobHandler
 	logger     *zap.Logger
+
 	wg       sync.WaitGroup
 	isClosed atomic.Bool
+	mu       sync.RWMutex
 	ctx      context.Context
 	cancel   context.CancelFunc
 }
@@ -69,6 +71,9 @@ func (wp *WorkerPool) processJob(workerID int, job domain.ProcessingJob) {
 }
 
 func (wp *WorkerPool) Submit(job domain.ProcessingJob) error {
+	wp.mu.RLock()
+	defer wp.mu.RUnlock()
+
 	if wp.isClosed.Load() {
 		return errors.New("worker pool is stopped")
 	}
@@ -82,8 +87,13 @@ func (wp *WorkerPool) Submit(job domain.ProcessingJob) error {
 }
 
 func (wp *WorkerPool) Stop(gracefulTimeout time.Duration) {
-	wp.isClosed.Store(true)
+	wp.mu.Lock()
+	if wp.isClosed.Swap(true) {
+		wp.mu.Unlock()
+		return
+	}
 	close(wp.jobQueue)
+	wp.mu.Unlock()
 
 	done := make(chan struct{})
 	go func() {

@@ -120,7 +120,8 @@ FROM
 WHERE
     user_id = $1
 ORDER BY
-    created_at;
+    created_at DESC;
+
 	`
 
 	rows, err := r.pool.Query(ctx, query, userID)

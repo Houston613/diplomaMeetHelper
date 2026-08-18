@@ -2,6 +2,7 @@ package usecase_test
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -119,8 +120,16 @@ func TestMeetingUsecase_LoadMeeting(t *testing.T) {
 		t.Fatalf("expected error for non-existing file, got nil")
 	}
 
-	// 2. Valid file
+	// 2. Unsupported format (.pdf)
 	tmpDir := t.TempDir()
+	invalidFile := filepath.Join(tmpDir, "document.pdf")
+	_ = os.WriteFile(invalidFile, []byte("fake pdf"), 0644)
+	_, err = uc.LoadMeeting(ctx, "user-1", invalidFile)
+	if !errors.Is(err, domain.ErrUnsupportedFormat) {
+		t.Fatalf("expected ErrUnsupportedFormat, got: %v", err)
+	}
+
+	// 3. Valid file (.txt)
 	tmpFile := filepath.Join(tmpDir, "meeting.txt")
 	_ = os.WriteFile(tmpFile, []byte("test meeting notes"), 0644)
 
@@ -154,6 +163,52 @@ func TestMeetingUsecase_LoadMeeting(t *testing.T) {
 	}
 	if submittedJob == nil || submittedJob.MeetingID != meetingID {
 		t.Errorf("submitted job meeting ID does not match")
+	}
+}
+
+func TestMeetingUsecase_GetMeetingDetails_StatusCheck(t *testing.T) {
+	ctx := context.Background()
+	meetingID := uuid.New()
+
+	// 1. Job not completed
+	mRepo := &mockMeetingRepo{
+		getMeetingDetailsFn: func(ctx context.Context, mID uuid.UUID, uID string) (*domain.MeetingDetails, error) {
+			return &domain.MeetingDetails{
+				Meeting: domain.Meeting{
+					ID:     mID,
+					UserID: uID,
+					Status: domain.StatusProcessing,
+				},
+			}, nil
+		},
+	}
+	uc := usecase.NewMeetingUsecase(mRepo, &mockJobRepo{}, &mockSubmitter{}, zap.NewNop())
+	_, err := uc.GetMeetingDetails(ctx, "user-1", meetingID)
+	if !errors.Is(err, domain.ErrJobNotCompleted) {
+		t.Fatalf("expected ErrJobNotCompleted, got: %v", err)
+	}
+
+	// 2. Job completed
+	mRepoCompleted := &mockMeetingRepo{
+		getMeetingDetailsFn: func(ctx context.Context, mID uuid.UUID, uID string) (*domain.MeetingDetails, error) {
+			return &domain.MeetingDetails{
+				Meeting: domain.Meeting{
+					ID:     mID,
+					UserID: uID,
+					Status: domain.StatusCompleted,
+				},
+				Transcript: &domain.Transcript{Content: "transcript"},
+				Summary:    &domain.Summary{Content: "summary"},
+			}, nil
+		},
+	}
+	ucCompleted := usecase.NewMeetingUsecase(mRepoCompleted, &mockJobRepo{}, &mockSubmitter{}, zap.NewNop())
+	details, err := ucCompleted.GetMeetingDetails(ctx, "user-1", meetingID)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if details.Transcript == nil || details.Transcript.Content != "transcript" {
+		t.Errorf("expected transcript content")
 	}
 }
 
