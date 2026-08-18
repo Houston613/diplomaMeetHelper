@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
-	"time"
 
 	"diplomaMeetHelper/internal/adapters/cli"
 	"diplomaMeetHelper/internal/adapters/db/postgres"
@@ -74,7 +73,7 @@ func Run(parentCtx context.Context) error {
 
 	pool := workerpool.New(cfg.App.Workers, 100, cfg.App.JobTimeout, jobHandler, log)
 	pool.Start()
-	defer pool.Stop(5 * time.Second)
+	defer pool.Stop(cfg.App.JobTimeout)
 
 	// Usecases
 	userUsecase := usecase.NewUserUsecase(userRepo)
