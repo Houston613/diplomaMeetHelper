@@ -2,6 +2,7 @@ package usecase_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -13,7 +14,7 @@ import (
 )
 
 type mockQARepo struct {
-	saveQAFn        func(ctx context.Context, item *domain.QAItem) error
+	saveQAFn       func(ctx context.Context, item *domain.QAItem) error
 	getQAHistoryFn func(ctx context.Context, meetingID uuid.UUID, userID string) ([]domain.QAItem, error)
 }
 
@@ -61,7 +62,14 @@ func TestChatUsecase_Ask(t *testing.T) {
 		},
 	}
 
-	qaRepo := &mockQARepo{}
+	var savedQA *domain.QAItem
+	qaRepo := &mockQARepo{
+		saveQAFn: func(ctx context.Context, item *domain.QAItem) error {
+			savedQA = item
+			return nil
+		},
+	}
+
 	llm := &mockChatLLM{
 		askQuestionFn: func(ctx context.Context, contextText string, question string) (string, error) {
 			return "Ответ: согласовано 10 сторипоинтов", nil
@@ -69,6 +77,32 @@ func TestChatUsecase_Ask(t *testing.T) {
 	}
 
 	uc := usecase.NewChatUsecase(mRepo, qaRepo, llm, zap.NewNop())
+
+	// 1. Empty question
+	_, err := uc.Ask(ctx, "user-1", meetingID, "   ")
+	if !errors.Is(err, domain.ErrEmptyQuestion) {
+		t.Fatalf("expected ErrEmptyQuestion, got: %v", err)
+	}
+
+	// 2. Non-completed meeting
+	mRepoProcessing := &mockMeetingRepo{
+		getMeetingDetailsFn: func(ctx context.Context, mID uuid.UUID, uID string) (*domain.MeetingDetails, error) {
+			return &domain.MeetingDetails{
+				Meeting: domain.Meeting{
+					ID:     mID,
+					UserID: uID,
+					Status: domain.StatusProcessing,
+				},
+			}, nil
+		},
+	}
+	ucProcessing := usecase.NewChatUsecase(mRepoProcessing, qaRepo, llm, zap.NewNop())
+	_, err = ucProcessing.Ask(ctx, "user-1", meetingID, "какой статус?")
+	if !errors.Is(err, domain.ErrJobNotCompleted) {
+		t.Fatalf("expected ErrJobNotCompleted, got: %v", err)
+	}
+
+	// 3. Valid question & QA saving
 	answer, err := uc.Ask(ctx, "user-1", meetingID, "сколько сторипоинтов?")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -76,5 +110,8 @@ func TestChatUsecase_Ask(t *testing.T) {
 
 	if answer != "Ответ: согласовано 10 сторипоинтов" {
 		t.Errorf("unexpected answer: %s", answer)
+	}
+	if savedQA == nil || savedQA.Question != "сколько сторипоинтов?" {
+		t.Errorf("expected QA history to be saved, got: %+v", savedQA)
 	}
 }

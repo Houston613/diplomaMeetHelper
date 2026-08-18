@@ -20,11 +20,11 @@ func TestFTSAndQA_Integration(t *testing.T) {
 	searchRepo := postgres.NewSearchRepository(pool)
 	qaRepo := postgres.NewQARepository(pool)
 
-	userID := "fts-user-" + uuid.NewString()
-	_, _, err := userRepo.EnsureUser(ctx, userID)
-	if err != nil {
-		t.Fatalf("EnsureUser failed: %v", err)
-	}
+	user1 := "fts-user-1-" + uuid.NewString()
+	user2 := "fts-user-2-" + uuid.NewString()
+
+	_, _, _ = userRepo.EnsureUser(ctx, user1)
+	_, _, _ = userRepo.EnsureUser(ctx, user2)
 
 	meetingID := uuid.New()
 	jobID := uuid.New()
@@ -32,7 +32,7 @@ func TestFTSAndQA_Integration(t *testing.T) {
 
 	meeting := &domain.Meeting{
 		ID:        meetingID,
-		UserID:    userID,
+		UserID:    user1,
 		Filename:  "architecture.mp3",
 		FilePath:  "/tmp/architecture.mp3",
 		Status:    domain.StatusCreated,
@@ -43,7 +43,7 @@ func TestFTSAndQA_Integration(t *testing.T) {
 	job := &domain.ProcessingJob{
 		ID:        jobID,
 		MeetingID: meetingID,
-		UserID:    userID,
+		UserID:    user1,
 		Status:    domain.StatusCreated,
 		CreatedAt: now,
 		UpdatedAt: now,
@@ -59,21 +59,30 @@ func TestFTSAndQA_Integration(t *testing.T) {
 		t.Fatalf("CompleteJobWithResults failed: %v", err)
 	}
 
-	// 1. Test FTS Search by single word
-	results, err := searchRepo.Search(ctx, userID, "микросервисов")
+	// 1. Test Multi-word Search with special characters (safe via plainto_tsquery)
+	results, err := searchRepo.Search(ctx, user1, "архитектура и миграции?")
 	if err != nil {
-		t.Fatalf("Search failed: %v", err)
+		t.Fatalf("Search failed on multi-word query: %v", err)
 	}
 
 	if len(results) == 0 {
-		t.Errorf("expected at least 1 search result for 'микросервисов'")
+		t.Errorf("expected search results for 'архитектура и миграции?'")
 	}
 
-	// 2. Test Save & Get QA History
+	// 2. Test User Isolation (user2 must not see user1's results)
+	user2Results, err := searchRepo.Search(ctx, user2, "архитектура")
+	if err != nil {
+		t.Fatalf("user2 search failed: %v", err)
+	}
+	if len(user2Results) != 0 {
+		t.Errorf("expected 0 results for user2, got %d", len(user2Results))
+	}
+
+	// 3. Test Save & Get QA History
 	qaItem := &domain.QAItem{
 		ID:        uuid.New(),
 		MeetingID: meetingID,
-		UserID:    userID,
+		UserID:    user1,
 		Question:  "Какая архитектура выбрана?",
 		Answer:    "Выбрана чистая архитектура.",
 		CreatedAt: time.Now(),
@@ -83,7 +92,7 @@ func TestFTSAndQA_Integration(t *testing.T) {
 		t.Fatalf("SaveQA failed: %v", err)
 	}
 
-	history, err := qaRepo.GetQAHistory(ctx, meetingID, userID)
+	history, err := qaRepo.GetQAHistory(ctx, meetingID, user1)
 	if err != nil {
 		t.Fatalf("GetQAHistory failed: %v", err)
 	}

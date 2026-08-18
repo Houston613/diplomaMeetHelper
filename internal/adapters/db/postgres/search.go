@@ -21,20 +21,20 @@ func NewSearchRepository(pool *pgxpool.Pool) *SearchRepository {
 
 func (r *SearchRepository) Search(ctx context.Context, userID string, query string) ([]domain.SearchResult, error) {
 	sqlQuery := `
-		SELECT
+SELECT
     m.id,
     m.filename,
     m.status,
     m.created_at,
     'transcript' AS match_source,
-    ts_headline('russian', t.content, to_tsquery('russian', $2), 'StartSel=, StopSel=, MaxWords=25, MinWords=10') AS snippet,
-    ts_rank(t.tsv, to_tsquery('russian', $2)) AS rank
+    ts_headline('russian', t.content, plainto_tsquery('russian', $2), 'StartSel=, StopSel=, MaxWords=25, MinWords=10') AS snippet,
+    ts_rank(t.tsv, plainto_tsquery('russian', $2)) AS rank
 FROM
     meethelper.transcriptions t
     JOIN meethelper.meetings m ON m.id = t.meeting_id
 WHERE
     m.user_id = $1
-    AND t.tsv @@ to_tsquery('russian', $2)
+    AND t.tsv @@ plainto_tsquery('russian', $2)
 UNION ALL
 SELECT
     m.id,
@@ -42,15 +42,17 @@ SELECT
     m.status,
     m.created_at,
     'summary' AS match_source,
-    ts_headline('russian', s.content, to_tsquery('russian', $2), 'StartSel=, StopSel=, MaxWords=25, MinWords=10') AS snippet,
-    ts_rank(s.tsv, to_tsquery('russian', $2)) AS rank
+    ts_headline('russian', s.content, plainto_tsquery('russian', $2), 'StartSel=, StopSel=, MaxWords=25, MinWords=10') AS snippet,
+    ts_rank(s.tsv, plainto_tsquery('russian', $2)) AS rank
 FROM
     meethelper.summaries s
     JOIN meethelper.meetings m ON m.id = s.meeting_id
 WHERE
-    s.tsv @@ to_tsquery('russian', $2)
+    m.user_id = $1
+    AND s.tsv @@ plainto_tsquery('russian', $2)
 ORDER BY
     rank DESC;
+
 	`
 
 	rows, err := r.pool.Query(ctx, sqlQuery, userID, query)

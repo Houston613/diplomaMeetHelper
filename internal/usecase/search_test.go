@@ -2,6 +2,7 @@ package usecase_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -23,8 +24,17 @@ func (m *mockSearchRepo) Search(ctx context.Context, userID string, query string
 	return nil, nil
 }
 
-func TestSearchUsecase_Success(t *testing.T) {
+func TestSearchUsecase(t *testing.T) {
 	ctx := context.Background()
+
+	// 1. Empty query
+	uc := usecase.NewSearchUsecase(&mockSearchRepo{}, zap.NewNop())
+	_, err := uc.Search(ctx, "user-1", "   ")
+	if !errors.Is(err, domain.ErrEmptySearchQuery) {
+		t.Fatalf("expected ErrEmptySearchQuery, got: %v", err)
+	}
+
+	// 2. Valid search
 	expectedResults := []domain.SearchResult{
 		{
 			MeetingID:   uuid.New(),
@@ -42,7 +52,7 @@ func TestSearchUsecase_Success(t *testing.T) {
 		},
 	}
 
-	uc := usecase.NewSearchUsecase(repo, zap.NewNop())
+	uc = usecase.NewSearchUsecase(repo, zap.NewNop())
 	results, err := uc.Search(ctx, "user-1", "миграции")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)

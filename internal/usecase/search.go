@@ -2,6 +2,7 @@ package usecase
 
 import (
 	"context"
+	"strings"
 
 	"diplomaMeetHelper/internal/domain"
 
@@ -25,5 +26,9 @@ func NewSearchUsecase(searchRepo SearchRepository, logger *zap.Logger) *SearchUs
 }
 
 func (u *SearchUsecase) Search(ctx context.Context, userID string, query string) ([]domain.SearchResult, error) {
+	if strings.TrimSpace(query) == "" {
+		return nil, domain.ErrEmptySearchQuery
+	}
+
 	return u.searchRepo.Search(ctx, userID, query)
 }

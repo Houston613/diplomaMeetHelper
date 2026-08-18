@@ -3,6 +3,8 @@ package usecase
 import (
 	"context"
 	"fmt"
+	"strings"
+	"time"
 
 	"diplomaMeetHelper/internal/domain"
 
@@ -41,10 +43,17 @@ func NewChatUsecase(
 }
 
 func (u *ChatUsecase) Ask(ctx context.Context, userID string, meetingID uuid.UUID, question string) (string, error) {
+	if strings.TrimSpace(question) == "" {
+		return "", domain.ErrEmptyQuestion
+	}
 
 	details, err := u.meetingRepo.GetMeetingDetails(ctx, meetingID, userID)
 	if err != nil {
 		return "", err
+	}
+
+	if details.Meeting.Status != domain.StatusCompleted {
+		return "", domain.ErrJobNotCompleted
 	}
 
 	contextText := ""
@@ -58,6 +67,22 @@ func (u *ChatUsecase) Ask(ctx context.Context, userID string, meetingID uuid.UUI
 	answer, err := u.llmClient.AskQuestion(ctx, contextText, question)
 	if err != nil {
 		return "", fmt.Errorf("failed to generate answer from LLM: %w", err)
+	}
+
+	qaItem := &domain.QAItem{
+		ID:        uuid.New(),
+		MeetingID: meetingID,
+		UserID:    userID,
+		Question:  question,
+		Answer:    answer,
+		CreatedAt: time.Now(),
+	}
+
+	if err := u.qaRepo.SaveQA(ctx, qaItem); err != nil {
+		u.logger.Warn("Failed to save QA history",
+			zap.String("meeting_id", meetingID.String()),
+			zap.Error(err),
+		)
 	}
 
 	return answer, nil
