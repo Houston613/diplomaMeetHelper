@@ -61,6 +61,8 @@ func Run(parentCtx context.Context) error {
 	userRepo := postgres.NewUserRepository(dbPool)
 	meetingRepo := postgres.NewMeetingRepository(dbPool)
 	jobRepo := postgres.NewJobRepository(dbPool)
+	searchRepo := postgres.NewSearchRepository(dbPool)
+	qaRepo := postgres.NewQARepository(dbPool)
 
 	// External Clients (Mock)
 	speechClient := mockSpeech.NewSpeechClient(cfg.Speech.Mock.Delay, cfg.Speech.Mock.ErrorRate)
@@ -78,9 +80,11 @@ func Run(parentCtx context.Context) error {
 	// Usecases
 	userUsecase := usecase.NewUserUsecase(userRepo)
 	meetingUsecase := usecase.NewMeetingUsecase(meetingRepo, jobRepo, pool, log)
+	searchUsecase := usecase.NewSearchUsecase(searchRepo, log)
+	chatUsecase := usecase.NewChatUsecase(meetingRepo, qaRepo, llmClient, log)
 
 	// CLI Presentation Layer
-	cliHandler := cli.NewHandler(userUsecase, meetingUsecase, log)
+	cliHandler := cli.NewHandler(userUsecase, meetingUsecase, searchUsecase, chatUsecase, log)
 	cliHandler.RootCmd().Version = version.Version
 
 	return cliHandler.Execute(ctx, os.Args[1:])

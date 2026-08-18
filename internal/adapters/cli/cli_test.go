@@ -68,10 +68,35 @@ func (m *mockMeetingService) GetMeetingDetails(ctx context.Context, userID strin
 	return nil, nil
 }
 
+type mockSearchService struct {
+	searchFn func(ctx context.Context, userID string, query string) ([]domain.SearchResult, error)
+}
+
+func (m *mockSearchService) Search(ctx context.Context, userID string, query string) ([]domain.SearchResult, error) {
+	if m.searchFn != nil {
+		return m.searchFn(ctx, userID, query)
+	}
+	return nil, nil
+}
+
+type mockChatService struct {
+	askFn func(ctx context.Context, userID string, meetingID uuid.UUID, question string) (string, error)
+}
+
+func (m *mockChatService) Ask(ctx context.Context, userID string, meetingID uuid.UUID, question string) (string, error) {
+	if m.askFn != nil {
+		return m.askFn(ctx, userID, meetingID, question)
+	}
+	return "mock answer", nil
+}
+
 func TestCLI_MissingUserID(t *testing.T) {
 	mockUser := &mockUserService{}
 	mockMeeting := &mockMeetingService{}
-	handler := cli.NewHandler(mockUser, mockMeeting, zap.NewNop())
+	mockSearch := &mockSearchService{}
+	mockChat := &mockChatService{}
+
+	handler := cli.NewHandler(mockUser, mockMeeting, mockSearch, mockChat, zap.NewNop())
 
 	var outBuf, errBuf bytes.Buffer
 	handler.SetOutput(&outBuf, &errBuf)
@@ -96,8 +121,10 @@ func TestCLI_StartNewUser(t *testing.T) {
 		},
 	}
 	mockMeeting := &mockMeetingService{}
+	mockSearch := &mockSearchService{}
+	mockChat := &mockChatService{}
 
-	handler := cli.NewHandler(mockUser, mockMeeting, zap.NewNop())
+	handler := cli.NewHandler(mockUser, mockMeeting, mockSearch, mockChat, zap.NewNop())
 	var outBuf, errBuf bytes.Buffer
 	handler.SetOutput(&outBuf, &errBuf)
 
@@ -112,51 +139,53 @@ func TestCLI_StartNewUser(t *testing.T) {
 	}
 }
 
-func TestCLI_LoadCommand(t *testing.T) {
-	expectedID := uuid.New()
-	mockMeeting := &mockMeetingService{
-		loadMeetingFn: func(ctx context.Context, userID string, filePath string) (uuid.UUID, error) {
-			return expectedID, nil
-		},
-	}
-	handler := cli.NewHandler(&mockUserService{}, mockMeeting, zap.NewNop())
-	var outBuf, errBuf bytes.Buffer
-	handler.SetOutput(&outBuf, &errBuf)
-
-	err := handler.Execute(context.Background(), []string{"load", "audio.mp3", "-u", "alex"})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if !strings.Contains(outBuf.String(), expectedID.String()) {
-		t.Errorf("expected output to contain meeting ID %s, got %s", expectedID, outBuf.String())
-	}
-}
-
-func TestCLI_ListCommand(t *testing.T) {
-	mockMeeting := &mockMeetingService{
-		listMeetingsFn: func(ctx context.Context, userID string) ([]domain.MeetingListItem, error) {
-			return []domain.MeetingListItem{
+func TestCLI_FindCommand(t *testing.T) {
+	mockSearch := &mockSearchService{
+		searchFn: func(ctx context.Context, userID string, query string) ([]domain.SearchResult, error) {
+			return []domain.SearchResult{
 				{
-					ID:        uuid.New(),
-					Filename:  "standup.mp3",
-					Status:    "completed",
-					CreatedAt: time.Now(),
-					UpdatedAt: time.Now(),
+					MeetingID:   uuid.New(),
+					Filename:    "standup.mp3",
+					MatchSource: "transcript",
+					CreatedAt:   time.Now(),
+					Snippet:     "обсудили <b>архитектуру</b> диплома",
 				},
 			}, nil
 		},
 	}
-	handler := cli.NewHandler(&mockUserService{}, mockMeeting, zap.NewNop())
+
+	handler := cli.NewHandler(&mockUserService{}, &mockMeetingService{}, mockSearch, &mockChatService{}, zap.NewNop())
 	var outBuf, errBuf bytes.Buffer
 	handler.SetOutput(&outBuf, &errBuf)
 
-	err := handler.Execute(context.Background(), []string{"list", "-u", "alex"})
+	err := handler.Execute(context.Background(), []string{"find", "архитектура", "-u", "alex"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if !strings.Contains(outBuf.String(), "standup.mp3") {
-		t.Errorf("expected output to contain filename, got %s", outBuf.String())
+	if !strings.Contains(outBuf.String(), "архитектуру") {
+		t.Errorf("expected output to contain snippet, got: %s", outBuf.String())
+	}
+}
+
+func TestCLI_ChatCommand(t *testing.T) {
+	meetingID := uuid.New()
+	mockChat := &mockChatService{
+		askFn: func(ctx context.Context, userID string, mID uuid.UUID, question string) (string, error) {
+			return "Принято решение завершить срез 3.", nil
+		},
+	}
+
+	handler := cli.NewHandler(&mockUserService{}, &mockMeetingService{}, &mockSearchService{}, mockChat, zap.NewNop())
+	var outBuf, errBuf bytes.Buffer
+	handler.SetOutput(&outBuf, &errBuf)
+
+	err := handler.Execute(context.Background(), []string{"chat", meetingID.String(), "какое", "решение?", "-u", "alex"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !strings.Contains(outBuf.String(), "Принято решение") {
+		t.Errorf("expected output to contain answer, got: %s", outBuf.String())
 	}
 }

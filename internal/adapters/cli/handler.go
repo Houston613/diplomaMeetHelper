@@ -29,25 +29,44 @@ type MeetingService interface {
 	GetMeetingDetails(ctx context.Context, userID string, meetingID uuid.UUID) (*domain.MeetingDetails, error)
 }
 
+type SearchService interface {
+	Search(ctx context.Context, userID string, query string) ([]domain.SearchResult, error)
+}
+
+type ChatService interface {
+	Ask(ctx context.Context, userID string, meetingID uuid.UUID, question string) (string, error)
+}
+
 // Handler инкапсулирует CLI-слой на базе Cobra.
 // Содержит зависимости бизнес-логики и потоки вывода:
-//   - userService / meetingService: интерфейсы бизнес-логики (Dependency Inversion).
+//   - userService / meetingService / searchService / chatService: интерфейсы бизнес-логики (Dependency Inversion).
 //   - userID: значение флага --user-id, изолированное в рамках экземпляра (без глобальных переменных).
 //   - outWriter/errWriter: абстракции io.Writer (stdout/stderr) для изоляции от ОС и прямого перехвата вывода в Unit-тестах.
 type Handler struct {
 	userService    UserService
 	meetingService MeetingService
+	searchService  SearchService
+	chatService    ChatService
 	logger         *zap.Logger
 	rootCmd        *cobra.Command
 	userID         string
+	meetingFlag    string
 	outWriter      io.Writer
 	errWriter      io.Writer
 }
 
-func NewHandler(userService UserService, meetingService MeetingService, logger *zap.Logger) *Handler {
+func NewHandler(
+	userService UserService,
+	meetingService MeetingService,
+	searchService SearchService,
+	chatService ChatService,
+	logger *zap.Logger,
+) *Handler {
 	h := &Handler{
 		userService:    userService,
 		meetingService: meetingService,
+		searchService:  searchService,
+		chatService:    chatService,
 		logger:         logger,
 		outWriter:      os.Stdout,
 		errWriter:      os.Stderr,
@@ -98,6 +117,8 @@ func (h *Handler) initCommands() {
 		h.newStatusCmd(),
 		h.newListCmd(),
 		h.newGetCmd(),
+		h.newFindCmd(),
+		h.newChatCmd(),
 	)
 }
 
@@ -229,20 +250,91 @@ func (h *Handler) newGetCmd() *cobra.Command {
 			fmt.Fprintln(h.outWriter, "=== ТРАНСКРИПЦИЯ ===")
 			if details.Transcript != nil {
 				fmt.Fprintln(h.outWriter, details.Transcript.Content)
-			} else {
-				fmt.Fprintln(h.outWriter, "(транскрипция пока не готова)")
 			}
 
 			fmt.Fprintln(h.outWriter, "\n=== ВЫЖИМКА (SUMMARY) ===")
 			if details.Summary != nil {
 				fmt.Fprintln(h.outWriter, details.Summary.Content)
-			} else {
-				fmt.Fprintln(h.outWriter, "(выжимка пока не готова)")
 			}
 
 			return nil
 		},
 	}
+}
+
+func (h *Handler) newFindCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "find <query>",
+		Short: "Полнотекстовый поиск по расшифровкам и выжимкам встреч",
+		Args:  cobra.MinimumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			query := strings.Join(args, " ")
+			results, err := h.searchService.Search(cmd.Context(), h.userID, query)
+			if err != nil {
+				return err
+			}
+
+			if len(results) == 0 {
+				fmt.Fprintln(h.outWriter, "Ничего не найдено.")
+				return nil
+			}
+
+			w := tabwriter.NewWriter(h.outWriter, 0, 0, 2, ' ', 0)
+			fmt.Fprintln(w, "ID встречи\tИмя файла\tИсточник\tДата\tФрагмент")
+			for _, r := range results {
+				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
+					r.MeetingID.String(),
+					r.Filename,
+					r.MatchSource,
+					r.CreatedAt.Format("2006-01-02 15:04"),
+					r.Snippet,
+				)
+			}
+			w.Flush()
+
+			return nil
+		},
+	}
+}
+
+func (h *Handler) newChatCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "chat [question...]",
+		Short: "Интерактивный вопрос к LLM по контексту встречи",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			var meetingID uuid.UUID
+			var question string
+			var err error
+
+			if h.meetingFlag != "" {
+				meetingID, err = uuid.Parse(h.meetingFlag)
+				if err != nil {
+					return fmt.Errorf("некорректный формат --meeting: %w", err)
+				}
+				question = strings.Join(args, " ")
+			} else {
+				if len(args) < 2 {
+					return errors.New("использование: chat --meeting <meeting_id> <вопрос> или chat <meeting_id> <вопрос>")
+				}
+				meetingID, err = uuid.Parse(args[0])
+				if err != nil {
+					return fmt.Errorf("некорректный формат meeting_id: %w", err)
+				}
+				question = strings.Join(args[1:], " ")
+			}
+
+			answer, err := h.chatService.Ask(cmd.Context(), h.userID, meetingID, question)
+			if err != nil {
+				return err
+			}
+
+			fmt.Fprintf(h.outWriter, "Ответ: %s\n", answer)
+			return nil
+		},
+	}
+
+	cmd.Flags().StringVarP(&h.meetingFlag, "meeting", "m", "", "Идентификатор встречи (UUID)")
+	return cmd
 }
 
 func (h *Handler) Execute(ctx context.Context, args []string) error {
