@@ -24,6 +24,7 @@ type MeetingRepository interface {
 
 type JobRepository interface {
 	GetJobByMeetingID(ctx context.Context, meetingID uuid.UUID, userID string) (*domain.JobStatusInfo, error)
+	UpdateJobStatus(ctx context.Context, jobID uuid.UUID, meetingID uuid.UUID, status string) error
 	CompleteJobWithResults(ctx context.Context, jobID uuid.UUID, meetingID uuid.UUID, transcript string, summary string) error
 	FailJob(ctx context.Context, jobID uuid.UUID, meetingID uuid.UUID, errorMessage string) error
 	RetryJob(ctx context.Context, meetingID uuid.UUID, userID string) (*domain.ProcessingJob, error)
@@ -172,6 +173,11 @@ func ProcessJobHandler(
 		zap.String("meeting_id", job.MeetingID.String()),
 	)
 
+	// 0. Update status to processing
+	if err := jobRepo.UpdateJobStatus(ctx, job.ID, job.MeetingID, domain.StatusProcessing); err != nil {
+		logger.Warn("Failed to update status to processing", zap.Error(err))
+	}
+
 	meeting, err := meetingRepo.GetMeeting(ctx, job.MeetingID, job.UserID)
 	if err != nil {
 		_ = jobRepo.FailJob(ctx, job.ID, job.MeetingID, err.Error())
@@ -185,11 +191,21 @@ func ProcessJobHandler(
 		return fmt.Errorf("transcription failed: %w", err)
 	}
 
+	// Update status to transcribed
+	if err := jobRepo.UpdateJobStatus(ctx, job.ID, job.MeetingID, domain.StatusTranscribed); err != nil {
+		logger.Warn("Failed to update status to transcribed", zap.Error(err))
+	}
+
 	// 2. Summarization step
 	summary, err := llm.Summarize(ctx, transcript)
 	if err != nil {
 		_ = jobRepo.FailJob(ctx, job.ID, job.MeetingID, "summarization failed: "+err.Error())
 		return fmt.Errorf("summarization failed: %w", err)
+	}
+
+	// Update status to summarized
+	if err := jobRepo.UpdateJobStatus(ctx, job.ID, job.MeetingID, domain.StatusSummarized); err != nil {
+		logger.Warn("Failed to update status to summarized", zap.Error(err))
 	}
 
 	// 3. Complete job with results atomically

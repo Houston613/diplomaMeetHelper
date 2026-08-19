@@ -214,12 +214,22 @@ func (h *Handler) newListCmd() *cobra.Command {
 			}
 
 			w := tabwriter.NewWriter(h.outWriter, 0, 0, 3, ' ', 0)
-			fmt.Fprintln(w, "ID\tИмя файла\tСтатус\tДата создания\tДата обновления")
+			fmt.Fprintln(w, "ID\tИмя файла\tСтатус\tВыжимка\tДата создания\tДата обновления")
 			for _, it := range items {
-				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
+				summaryText := it.Summary
+				if summaryText == "" {
+					summaryText = "-"
+				} else {
+					runes := []rune(summaryText)
+					if len(runes) > 40 {
+						summaryText = string(runes[:37]) + "..."
+					}
+				}
+				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n",
 					it.ID.String(),
 					it.Filename,
 					it.Status,
+					summaryText,
 					it.CreatedAt.Format("2006-01-02 15:04:05"),
 					it.UpdatedAt.Format("2006-01-02 15:04:05"),
 				)

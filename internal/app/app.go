@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"diplomaMeetHelper/internal/adapters/cli"
@@ -64,9 +65,28 @@ func Run(parentCtx context.Context) error {
 	searchRepo := postgres.NewSearchRepository(dbPool)
 	qaRepo := postgres.NewQARepository(dbPool)
 
-	// External Clients (Mock)
-	speechClient := mockSpeech.NewSpeechClient(cfg.Speech.Mock.Delay, cfg.Speech.Mock.ErrorRate)
-	llmClient := mockLLM.NewLLMClient(cfg.LLM.Mock.Delay, cfg.LLM.Mock.ErrorRate)
+	// External Speech Client
+	var speechClient usecase.SpeechClient
+	switch strings.ToLower(cfg.Speech.Provider) {
+	case "mock":
+		speechClient = mockSpeech.NewSpeechClient(cfg.Speech.Mock.Delay, cfg.Speech.Mock.ErrorRate)
+	default:
+		return fmt.Errorf("unsupported speech provider: %q (supported: mock)", cfg.Speech.Provider)
+	}
+
+	// External LLM Client
+	type fullLLMClient interface {
+		usecase.LLMClient
+		usecase.ChatLLMClient
+	}
+
+	var llmClient fullLLMClient
+	switch strings.ToLower(cfg.LLM.Provider) {
+	case "mock":
+		llmClient = mockLLM.NewLLMClient(cfg.LLM.Mock.Delay, cfg.LLM.Mock.ErrorRate)
+	default:
+		return fmt.Errorf("unsupported LLM provider: %q (supported: mock)", cfg.LLM.Provider)
+	}
 
 	// Worker Pool
 	jobHandler := func(jobCtx context.Context, job domain.ProcessingJob) error {

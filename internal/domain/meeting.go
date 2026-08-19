@@ -34,6 +34,7 @@ type MeetingListItem struct {
 	ID        uuid.UUID `json:"id"`
 	Filename  string    `json:"filename"`
 	Status    string    `json:"status"`
+	Summary   string    `json:"summary,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }

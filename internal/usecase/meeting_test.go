@@ -60,6 +60,7 @@ func (m *mockMeetingRepo) DeleteMeeting(ctx context.Context, meetingID uuid.UUID
 
 type mockJobRepo struct {
 	getJobByMeetingIDFn      func(ctx context.Context, meetingID uuid.UUID, userID string) (*domain.JobStatusInfo, error)
+	updateJobStatusFn        func(ctx context.Context, jobID uuid.UUID, meetingID uuid.UUID, status string) error
 	completeJobWithResultsFn func(ctx context.Context, jobID uuid.UUID, meetingID uuid.UUID, transcript string, summary string) error
 	failJobFn                func(ctx context.Context, jobID uuid.UUID, meetingID uuid.UUID, errorMessage string) error
 	retryJobFn               func(ctx context.Context, meetingID uuid.UUID, userID string) (*domain.ProcessingJob, error)
@@ -70,6 +71,13 @@ func (m *mockJobRepo) GetJobByMeetingID(ctx context.Context, meetingID uuid.UUID
 		return m.getJobByMeetingIDFn(ctx, meetingID, userID)
 	}
 	return nil, nil
+}
+
+func (m *mockJobRepo) UpdateJobStatus(ctx context.Context, jobID uuid.UUID, meetingID uuid.UUID, status string) error {
+	if m.updateJobStatusFn != nil {
+		return m.updateJobStatusFn(ctx, jobID, meetingID, status)
+	}
+	return nil
 }
 
 func (m *mockJobRepo) CompleteJobWithResults(ctx context.Context, jobID uuid.UUID, meetingID uuid.UUID, transcript string, summary string) error {
@@ -301,8 +309,13 @@ func TestProcessJobHandler_Success(t *testing.T) {
 		},
 	}
 
+	var statusTransitions []string
 	var completedTranscript, completedSummary string
 	jRepo := &mockJobRepo{
+		updateJobStatusFn: func(ctx context.Context, jID uuid.UUID, mID uuid.UUID, status string) error {
+			statusTransitions = append(statusTransitions, status)
+			return nil
+		},
 		completeJobWithResultsFn: func(ctx context.Context, jID uuid.UUID, mID uuid.UUID, transcript string, summary string) error {
 			completedTranscript = transcript
 			completedSummary = summary
@@ -334,10 +347,131 @@ func TestProcessJobHandler_Success(t *testing.T) {
 		t.Fatalf("ProcessJobHandler failed: %v", err)
 	}
 
+	// Verify all intermediate statuses were reported in exact order
+	expectedTransitions := []string{
+		domain.StatusProcessing,
+		domain.StatusTranscribed,
+		domain.StatusSummarized,
+	}
+	if len(statusTransitions) != len(expectedTransitions) {
+		t.Fatalf("expected %d transitions, got %d: %v", len(expectedTransitions), len(statusTransitions), statusTransitions)
+	}
+	for i, expected := range expectedTransitions {
+		if statusTransitions[i] != expected {
+			t.Errorf("transition [%d]: expected %s, got %s", i, expected, statusTransitions[i])
+		}
+	}
+
 	if completedTranscript != "full transcription text" {
 		t.Errorf("unexpected transcript: %q", completedTranscript)
 	}
 	if completedSummary != "summary result" {
 		t.Errorf("unexpected summary: %q", completedSummary)
+	}
+}
+
+func TestProcessJobHandler_SpeechFailure(t *testing.T) {
+	ctx := context.Background()
+	meetingID := uuid.New()
+	jobID := uuid.New()
+
+	mRepo := &mockMeetingRepo{
+		getMeetingFn: func(ctx context.Context, mID uuid.UUID, uID string) (*domain.Meeting, error) {
+			return &domain.Meeting{
+				ID:       mID,
+				UserID:   uID,
+				FilePath: "error_meeting.txt",
+			}, nil
+		},
+	}
+
+	var failedErrorMessage string
+	jRepo := &mockJobRepo{
+		updateJobStatusFn: func(ctx context.Context, jID uuid.UUID, mID uuid.UUID, status string) error {
+			return nil
+		},
+		failJobFn: func(ctx context.Context, jID uuid.UUID, mID uuid.UUID, errorMessage string) error {
+			failedErrorMessage = errorMessage
+			return nil
+		},
+	}
+
+	speech := &mockSpeech{
+		transcribeFn: func(ctx context.Context, filePath string) (string, error) {
+			return "", errors.New("simulated speech recognition failure")
+		},
+	}
+
+	llm := &mockLLM{}
+
+	job := domain.ProcessingJob{
+		ID:        jobID,
+		MeetingID: meetingID,
+		UserID:    "user-1",
+		CreatedAt: time.Now(),
+	}
+
+	err := usecase.ProcessJobHandler(ctx, job, mRepo, jRepo, speech, llm, zap.NewNop())
+	if err == nil {
+		t.Fatalf("expected error from failed transcription, got nil")
+	}
+
+	if failedErrorMessage == "" {
+		t.Errorf("expected FailJob to be called with error message")
+	}
+}
+
+func TestProcessJobHandler_ContextCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // Cancel immediately
+
+	meetingID := uuid.New()
+	jobID := uuid.New()
+
+	mRepo := &mockMeetingRepo{
+		getMeetingFn: func(ctx context.Context, mID uuid.UUID, uID string) (*domain.Meeting, error) {
+			return &domain.Meeting{
+				ID:       mID,
+				UserID:   uID,
+				FilePath: "meeting.txt",
+			}, nil
+		},
+	}
+
+	var failedErrorMessage string
+	jRepo := &mockJobRepo{
+		updateJobStatusFn: func(ctx context.Context, jID uuid.UUID, mID uuid.UUID, status string) error {
+			return nil
+		},
+		failJobFn: func(ctx context.Context, jID uuid.UUID, mID uuid.UUID, errorMessage string) error {
+			failedErrorMessage = errorMessage
+			return nil
+		},
+	}
+
+	speech := &mockSpeech{
+		transcribeFn: func(ctx context.Context, filePath string) (string, error) {
+			if ctx.Err() != nil {
+				return "", ctx.Err()
+			}
+			return "transcription", nil
+		},
+	}
+
+	llm := &mockLLM{}
+
+	job := domain.ProcessingJob{
+		ID:        jobID,
+		MeetingID: meetingID,
+		UserID:    "user-1",
+		CreatedAt: time.Now(),
+	}
+
+	err := usecase.ProcessJobHandler(ctx, job, mRepo, jRepo, speech, llm, zap.NewNop())
+	if err == nil {
+		t.Fatalf("expected error due to cancelled context, got nil")
+	}
+	if failedErrorMessage == "" {
+		t.Errorf("expected FailJob to be called with cancellation error")
 	}
 }

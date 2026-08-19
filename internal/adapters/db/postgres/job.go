@@ -56,6 +56,36 @@ func (r *JobRepository) GetJobByMeetingID(ctx context.Context, meetingID uuid.UU
 	return &info, nil
 }
 
+func (r *JobRepository) UpdateJobStatus(ctx context.Context, jobID uuid.UUID, meetingID uuid.UUID, status string) error {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	now := time.Now()
+
+	_, err = tx.Exec(ctx, `
+		UPDATE meethelper.processing_jobs
+		SET status = $1, updated_at = $2
+		WHERE id = $3;
+	`, status, now, jobID)
+	if err != nil {
+		return fmt.Errorf("failed to update job status: %w", err)
+	}
+
+	_, err = tx.Exec(ctx, `
+		UPDATE meethelper.meetings
+		SET status = $1, updated_at = $2
+		WHERE id = $3;
+	`, status, now, meetingID)
+	if err != nil {
+		return fmt.Errorf("failed to update meeting status: %w", err)
+	}
+
+	return tx.Commit(ctx)
+}
+
 func (r *JobRepository) CompleteJobWithResults(ctx context.Context, jobID uuid.UUID, meetingID uuid.UUID, transcript string, summary string) error {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {

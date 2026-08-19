@@ -110,18 +110,19 @@ WHERE
 func (r *MeetingRepository) ListMeetings(ctx context.Context, userID string) ([]domain.MeetingListItem, error) {
 	query := `
 SELECT
-    id,
-    filename,
-    status,
-    created_at,
-    updated_at
+    m.id,
+    m.filename,
+    m.status,
+    COALESCE(s.content, '') AS summary,
+    m.created_at,
+    m.updated_at
 FROM
-    meethelper.meetings
+    meethelper.meetings m
+    LEFT JOIN meethelper.summaries s ON m.id = s.meeting_id
 WHERE
-    user_id = $1
+    m.user_id = $1
 ORDER BY
-    created_at DESC;
-
+    m.created_at DESC;
 	`
 
 	rows, err := r.pool.Query(ctx, query, userID)
@@ -133,7 +134,7 @@ ORDER BY
 	var items []domain.MeetingListItem
 	for rows.Next() {
 		var item domain.MeetingListItem
-		if err := rows.Scan(&item.ID, &item.Filename, &item.Status, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := rows.Scan(&item.ID, &item.Filename, &item.Status, &item.Summary, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("failed to scan meeting item: %w", err)
 		}
 		items = append(items, item)

@@ -87,6 +87,9 @@ func TestFullE2E_UserJourney(t *testing.T) {
 	if len(list) != 1 || list[0].ID != meetingID {
 		t.Fatalf("expected 1 meeting in list, got: %d", len(list))
 	}
+	if !strings.Contains(list[0].Summary, "Краткое содержание") {
+		t.Errorf("expected list item to contain summary, got: %q", list[0].Summary)
+	}
 
 	// 5. Get Meeting Details (get)
 	details, err := meetingUC.GetMeetingDetails(ctx, userID, meetingID)

@@ -61,6 +61,20 @@ func TestMeetingRepository_FullPipeline_Integration(t *testing.T) {
 		t.Fatalf("CreateMeetingWithJob failed: %v", err)
 	}
 
+	// 1.1 Test intermediate status transitions
+	for _, status := range []string{domain.StatusProcessing, domain.StatusTranscribed, domain.StatusSummarized} {
+		if err := jobRepo.UpdateJobStatus(ctx, jobID, meetingID, status); err != nil {
+			t.Fatalf("UpdateJobStatus to %s failed: %v", status, err)
+		}
+		statusInfo, err := jobRepo.GetJobByMeetingID(ctx, meetingID, user1)
+		if err != nil {
+			t.Fatalf("GetJobByMeetingID failed: %v", err)
+		}
+		if statusInfo.Status != status {
+			t.Errorf("expected status %s, got %s", status, statusInfo.Status)
+		}
+	}
+
 	// 2. Complete job with results
 	transcript := "Meeting transcription text about sprint planning."
 	summary := "Sprint planning summary: 5 story points planned."
@@ -96,5 +110,8 @@ func TestMeetingRepository_FullPipeline_Integration(t *testing.T) {
 	}
 	if len(list) == 0 || list[0].ID != meetingID {
 		t.Errorf("expected list to contain meeting %s", meetingID)
+	}
+	if list[0].Summary != summary {
+		t.Errorf("expected list[0].Summary to be %q, got %q", summary, list[0].Summary)
 	}
 }

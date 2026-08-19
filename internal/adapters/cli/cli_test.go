@@ -259,3 +259,42 @@ func TestCLI_DeleteCommand(t *testing.T) {
 		t.Errorf("unexpected output: %s", outBuf.String())
 	}
 }
+
+func TestCLI_ListCommand(t *testing.T) {
+	meetingID := uuid.New()
+	mockMeeting := &mockMeetingService{
+		listMeetingsFn: func(ctx context.Context, userID string) ([]domain.MeetingListItem, error) {
+			return []domain.MeetingListItem{
+				{
+					ID:        meetingID,
+					Filename:  "weekly_sync.mp3",
+					Status:    domain.StatusCompleted,
+					Summary:   "Согласованы сроки релиза и архитектура сервиса.",
+					CreatedAt: time.Now(),
+					UpdatedAt: time.Now(),
+				},
+			}, nil
+		},
+	}
+
+	handler := cli.NewHandler(&mockUserService{}, mockMeeting, &mockSearchService{}, &mockChatService{}, zap.NewNop())
+	var outBuf, errBuf bytes.Buffer
+	handler.SetOutput(&outBuf, &errBuf)
+
+	err := handler.Execute(context.Background(), []string{"list", "-u", "alex"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	output := outBuf.String()
+	if !strings.Contains(output, "Выжимка") {
+		t.Errorf("expected header to contain 'Выжимка', got: %s", output)
+	}
+	if !strings.Contains(output, "weekly_sync.mp3") {
+		t.Errorf("expected output to contain filename, got: %s", output)
+	}
+	if !strings.Contains(output, "Согласованы") {
+		t.Errorf("expected output to contain summary snippet, got: %s", output)
+	}
+}
+
