@@ -12,6 +12,7 @@ var (
 	ErrAccessDenied      = errors.New("access denied: resource belongs to another user")
 	ErrJobNotFound       = errors.New("job not found")
 	ErrJobNotCompleted   = errors.New("meeting processing is not completed")
+	ErrJobNotRetryable   = errors.New("job is not in failed status and cannot be retried")
 	ErrFileNotFound      = errors.New("file not found")
 	ErrUnsupportedFormat = errors.New("unsupported file format")
 	ErrQueueFull         = errors.New("worker pool queue is full")

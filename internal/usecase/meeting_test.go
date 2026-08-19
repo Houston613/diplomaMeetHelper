@@ -20,6 +20,7 @@ type mockMeetingRepo struct {
 	getMeetingFn           func(ctx context.Context, meetingID uuid.UUID, userID string) (*domain.Meeting, error)
 	listMeetingsFn         func(ctx context.Context, userID string) ([]domain.MeetingListItem, error)
 	getMeetingDetailsFn    func(ctx context.Context, meetingID uuid.UUID, userID string) (*domain.MeetingDetails, error)
+	deleteMeetingFn        func(ctx context.Context, meetingID uuid.UUID, userID string) error
 }
 
 func (m *mockMeetingRepo) CreateMeetingWithJob(ctx context.Context, meeting *domain.Meeting, job *domain.ProcessingJob) error {
@@ -50,10 +51,18 @@ func (m *mockMeetingRepo) GetMeetingDetails(ctx context.Context, meetingID uuid.
 	return nil, nil
 }
 
+func (m *mockMeetingRepo) DeleteMeeting(ctx context.Context, meetingID uuid.UUID, userID string) error {
+	if m.deleteMeetingFn != nil {
+		return m.deleteMeetingFn(ctx, meetingID, userID)
+	}
+	return nil
+}
+
 type mockJobRepo struct {
 	getJobByMeetingIDFn      func(ctx context.Context, meetingID uuid.UUID, userID string) (*domain.JobStatusInfo, error)
 	completeJobWithResultsFn func(ctx context.Context, jobID uuid.UUID, meetingID uuid.UUID, transcript string, summary string) error
 	failJobFn                func(ctx context.Context, jobID uuid.UUID, meetingID uuid.UUID, errorMessage string) error
+	retryJobFn               func(ctx context.Context, meetingID uuid.UUID, userID string) (*domain.ProcessingJob, error)
 }
 
 func (m *mockJobRepo) GetJobByMeetingID(ctx context.Context, meetingID uuid.UUID, userID string) (*domain.JobStatusInfo, error) {
@@ -75,6 +84,13 @@ func (m *mockJobRepo) FailJob(ctx context.Context, jobID uuid.UUID, meetingID uu
 		return m.failJobFn(ctx, jobID, meetingID, errorMessage)
 	}
 	return nil
+}
+
+func (m *mockJobRepo) RetryJob(ctx context.Context, meetingID uuid.UUID, userID string) (*domain.ProcessingJob, error) {
+	if m.retryJobFn != nil {
+		return m.retryJobFn(ctx, meetingID, userID)
+	}
+	return nil, nil
 }
 
 type mockSubmitter struct {
@@ -163,6 +179,64 @@ func TestMeetingUsecase_LoadMeeting(t *testing.T) {
 	}
 	if submittedJob == nil || submittedJob.MeetingID != meetingID {
 		t.Errorf("submitted job meeting ID does not match")
+	}
+}
+
+func TestMeetingUsecase_RetryMeeting(t *testing.T) {
+	ctx := context.Background()
+	meetingID := uuid.New()
+
+	var retriedJob *domain.ProcessingJob
+	jRepo := &mockJobRepo{
+		retryJobFn: func(ctx context.Context, mID uuid.UUID, userID string) (*domain.ProcessingJob, error) {
+			job := &domain.ProcessingJob{
+				ID:         uuid.New(),
+				MeetingID:  mID,
+				UserID:     userID,
+				Status:     domain.StatusCreated,
+				RetryCount: 1,
+			}
+			return job, nil
+		},
+	}
+	sub := &mockSubmitter{
+		submitFn: func(job domain.ProcessingJob) error {
+			retriedJob = &job
+			return nil
+		},
+	}
+
+	uc := usecase.NewMeetingUsecase(&mockMeetingRepo{}, jRepo, sub, zap.NewNop())
+	err := uc.RetryMeeting(ctx, "user-1", meetingID)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if retriedJob == nil || retriedJob.MeetingID != meetingID || retriedJob.RetryCount != 1 {
+		t.Errorf("expected job to be resubmitted with retry count 1, got %+v", retriedJob)
+	}
+}
+
+func TestMeetingUsecase_DeleteMeeting(t *testing.T) {
+	ctx := context.Background()
+	meetingID := uuid.New()
+
+	var deletedID uuid.UUID
+	mRepo := &mockMeetingRepo{
+		deleteMeetingFn: func(ctx context.Context, mID uuid.UUID, userID string) error {
+			deletedID = mID
+			return nil
+		},
+	}
+
+	uc := usecase.NewMeetingUsecase(mRepo, &mockJobRepo{}, &mockSubmitter{}, zap.NewNop())
+	err := uc.DeleteMeeting(ctx, "user-1", meetingID)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if deletedID != meetingID {
+		t.Errorf("expected deleted meeting ID %s, got %s", meetingID, deletedID)
 	}
 }
 

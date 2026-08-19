@@ -77,6 +77,22 @@ func Run(parentCtx context.Context) error {
 	pool.Start()
 	defer pool.Stop(cfg.App.JobTimeout)
 
+	// Startup Reconciliation: автовосстановление незавершенных задач при рестарте
+	pendingJobs, err := jobRepo.GetPendingJobs(ctx)
+	if err != nil {
+		log.Warn("Failed to fetch pending jobs for recovery", zap.Error(err))
+	} else if len(pendingJobs) > 0 {
+		log.Info("Recovering pending jobs on startup", zap.Int("count", len(pendingJobs)))
+		for _, job := range pendingJobs {
+			if err := pool.Submit(job); err != nil {
+				log.Warn("Failed to submit recovered job to queue",
+					zap.String("job_id", job.ID.String()),
+					zap.Error(err),
+				)
+			}
+		}
+	}
+
 	// Usecases
 	userUsecase := usecase.NewUserUsecase(userRepo)
 	meetingUsecase := usecase.NewMeetingUsecase(meetingRepo, jobRepo, pool, log)

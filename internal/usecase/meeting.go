@@ -19,12 +19,14 @@ type MeetingRepository interface {
 	GetMeeting(ctx context.Context, meetingID uuid.UUID, userID string) (*domain.Meeting, error)
 	ListMeetings(ctx context.Context, userID string) ([]domain.MeetingListItem, error)
 	GetMeetingDetails(ctx context.Context, meetingID uuid.UUID, userID string) (*domain.MeetingDetails, error)
+	DeleteMeeting(ctx context.Context, meetingID uuid.UUID, userID string) error
 }
 
 type JobRepository interface {
 	GetJobByMeetingID(ctx context.Context, meetingID uuid.UUID, userID string) (*domain.JobStatusInfo, error)
 	CompleteJobWithResults(ctx context.Context, jobID uuid.UUID, meetingID uuid.UUID, transcript string, summary string) error
 	FailJob(ctx context.Context, jobID uuid.UUID, meetingID uuid.UUID, errorMessage string) error
+	RetryJob(ctx context.Context, meetingID uuid.UUID, userID string) (*domain.ProcessingJob, error)
 }
 
 type SpeechClient interface {
@@ -134,6 +136,26 @@ func (u *MeetingUsecase) GetMeetingDetails(ctx context.Context, userID string, m
 	}
 
 	return details, nil
+}
+
+func (u *MeetingUsecase) RetryMeeting(ctx context.Context, userID string, meetingID uuid.UUID) error {
+	job, err := u.jobRepo.RetryJob(ctx, meetingID, userID)
+	if err != nil {
+		return err
+	}
+
+	if err := u.submitter.Submit(*job); err != nil {
+		u.logger.Warn("Failed to submit retried job to worker queue",
+			zap.String("job_id", job.ID.String()),
+			zap.Error(err),
+		)
+	}
+
+	return nil
+}
+
+func (u *MeetingUsecase) DeleteMeeting(ctx context.Context, userID string, meetingID uuid.UUID) error {
+	return u.meetingRepo.DeleteMeeting(ctx, meetingID, userID)
 }
 
 func ProcessJobHandler(

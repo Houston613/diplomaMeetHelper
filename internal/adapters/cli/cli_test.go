@@ -38,6 +38,8 @@ type mockMeetingService struct {
 	getMeetingStatusFn  func(ctx context.Context, userID string, meetingID uuid.UUID) (*domain.JobStatusInfo, error)
 	listMeetingsFn      func(ctx context.Context, userID string) ([]domain.MeetingListItem, error)
 	getMeetingDetailsFn func(ctx context.Context, userID string, meetingID uuid.UUID) (*domain.MeetingDetails, error)
+	retryMeetingFn      func(ctx context.Context, userID string, meetingID uuid.UUID) error
+	deleteMeetingFn     func(ctx context.Context, userID string, meetingID uuid.UUID) error
 }
 
 func (m *mockMeetingService) LoadMeeting(ctx context.Context, userID string, filePath string) (uuid.UUID, error) {
@@ -66,6 +68,20 @@ func (m *mockMeetingService) GetMeetingDetails(ctx context.Context, userID strin
 		return m.getMeetingDetailsFn(ctx, userID, meetingID)
 	}
 	return nil, nil
+}
+
+func (m *mockMeetingService) RetryMeeting(ctx context.Context, userID string, meetingID uuid.UUID) error {
+	if m.retryMeetingFn != nil {
+		return m.retryMeetingFn(ctx, userID, meetingID)
+	}
+	return nil
+}
+
+func (m *mockMeetingService) DeleteMeeting(ctx context.Context, userID string, meetingID uuid.UUID) error {
+	if m.deleteMeetingFn != nil {
+		return m.deleteMeetingFn(ctx, userID, meetingID)
+	}
+	return nil
 }
 
 type mockSearchService struct {
@@ -187,5 +203,59 @@ func TestCLI_ChatCommand(t *testing.T) {
 
 	if !strings.Contains(outBuf.String(), "Принято решение") {
 		t.Errorf("expected output to contain answer, got: %s", outBuf.String())
+	}
+}
+
+func TestCLI_RetryCommand(t *testing.T) {
+	meetingID := uuid.New()
+	var retriedID uuid.UUID
+	mockMeeting := &mockMeetingService{
+		retryMeetingFn: func(ctx context.Context, userID string, mID uuid.UUID) error {
+			retriedID = mID
+			return nil
+		},
+	}
+
+	handler := cli.NewHandler(&mockUserService{}, mockMeeting, &mockSearchService{}, &mockChatService{}, zap.NewNop())
+	var outBuf, errBuf bytes.Buffer
+	handler.SetOutput(&outBuf, &errBuf)
+
+	err := handler.Execute(context.Background(), []string{"retry", meetingID.String(), "-u", "alex"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if retriedID != meetingID {
+		t.Errorf("expected retried meeting ID %s, got %s", meetingID, retriedID)
+	}
+	if !strings.Contains(outBuf.String(), "Повторная обработка встречи") {
+		t.Errorf("unexpected output: %s", outBuf.String())
+	}
+}
+
+func TestCLI_DeleteCommand(t *testing.T) {
+	meetingID := uuid.New()
+	var deletedID uuid.UUID
+	mockMeeting := &mockMeetingService{
+		deleteMeetingFn: func(ctx context.Context, userID string, mID uuid.UUID) error {
+			deletedID = mID
+			return nil
+		},
+	}
+
+	handler := cli.NewHandler(&mockUserService{}, mockMeeting, &mockSearchService{}, &mockChatService{}, zap.NewNop())
+	var outBuf, errBuf bytes.Buffer
+	handler.SetOutput(&outBuf, &errBuf)
+
+	err := handler.Execute(context.Background(), []string{"delete", meetingID.String(), "-u", "alex"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if deletedID != meetingID {
+		t.Errorf("expected deleted meeting ID %s, got %s", meetingID, deletedID)
+	}
+	if !strings.Contains(outBuf.String(), "успешно удалены") {
+		t.Errorf("unexpected output: %s", outBuf.String())
 	}
 }

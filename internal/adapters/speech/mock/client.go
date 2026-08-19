@@ -2,7 +2,9 @@ package mock
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"math/rand"
 	"os"
 	"strings"
 	"time"
@@ -31,8 +33,16 @@ func (c *SpeechClient) Transcribe(ctx context.Context, filePath string) (string,
 
 	data, err := os.ReadFile(filePath)
 	if err == nil && len(data) > 0 {
-		return strings.TrimSpace(string(data)), nil
+		content := strings.TrimSpace(string(data))
+		if strings.Contains(content, "[SIMULATE_SPEECH_ERROR]") {
+			return "", errors.New("simulated speech recognition failure")
+		}
+		return content, nil
 	}
 
-	return fmt.Sprintf("Транскрипция аудиозаписи %s: Здесь просто текст и ничего интересного пока что.", filePath), nil
+	if c.errorRate > 0 && rand.Intn(100) < c.errorRate {
+		return "", fmt.Errorf("speech recognition service temporarily unavailable (error_rate=%d%%)", c.errorRate)
+	}
+
+	return fmt.Sprintf("Транскрипция аудиозаписи %s: Обсуждение архитектуры проекта, этапов интеграции и критериев защиты диплома.", filePath), nil
 }

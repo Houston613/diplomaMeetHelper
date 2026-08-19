@@ -27,6 +27,8 @@ type MeetingService interface {
 	GetMeetingStatus(ctx context.Context, userID string, meetingID uuid.UUID) (*domain.JobStatusInfo, error)
 	ListMeetings(ctx context.Context, userID string) ([]domain.MeetingListItem, error)
 	GetMeetingDetails(ctx context.Context, userID string, meetingID uuid.UUID) (*domain.MeetingDetails, error)
+	RetryMeeting(ctx context.Context, userID string, meetingID uuid.UUID) error
+	DeleteMeeting(ctx context.Context, userID string, meetingID uuid.UUID) error
 }
 
 type SearchService interface {
@@ -119,6 +121,8 @@ func (h *Handler) initCommands() {
 		h.newGetCmd(),
 		h.newFindCmd(),
 		h.newChatCmd(),
+		h.newRetryCmd(),
+		h.newDeleteCmd(),
 	)
 }
 
@@ -335,6 +339,50 @@ func (h *Handler) newChatCmd() *cobra.Command {
 
 	cmd.Flags().StringVarP(&h.meetingFlag, "meeting", "m", "", "Идентификатор встречи (UUID)")
 	return cmd
+}
+
+func (h *Handler) newRetryCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "retry <meeting_id>",
+		Short: "Повторная обработка встречи в случае сбоя",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			meetingID, err := uuid.Parse(args[0])
+			if err != nil {
+				return fmt.Errorf("некорректный формат meeting_id: %w", err)
+			}
+
+			err = h.meetingService.RetryMeeting(cmd.Context(), h.userID, meetingID)
+			if err != nil {
+				return err
+			}
+
+			fmt.Fprintf(h.outWriter, "Повторная обработка встречи %s успешно запущена\n", meetingID.String())
+			return nil
+		},
+	}
+}
+
+func (h *Handler) newDeleteCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "delete <meeting_id>",
+		Short: "Удаление встречи и всех связанных данных",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			meetingID, err := uuid.Parse(args[0])
+			if err != nil {
+				return fmt.Errorf("некорректный формат meeting_id: %w", err)
+			}
+
+			err = h.meetingService.DeleteMeeting(cmd.Context(), h.userID, meetingID)
+			if err != nil {
+				return err
+			}
+
+			fmt.Fprintf(h.outWriter, "Встреча %s и все связанные данные успешно удалены\n", meetingID.String())
+			return nil
+		},
+	}
 }
 
 func (h *Handler) Execute(ctx context.Context, args []string) error {

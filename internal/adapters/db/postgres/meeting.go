@@ -190,3 +190,23 @@ WHERE
 
 	return details, nil
 }
+
+func (r *MeetingRepository) DeleteMeeting(ctx context.Context, meetingID uuid.UUID, userID string) error {
+	// 1. Verify existence & ownership
+	_, err := r.GetMeeting(ctx, meetingID, userID)
+	if err != nil {
+		return err
+	}
+
+	// 2. Cascade delete
+	query := `
+		DELETE FROM meethelper.meetings
+		WHERE id = $1 AND user_id = $2;
+	`
+	_, err = r.pool.Exec(ctx, query, meetingID, userID)
+	if err != nil {
+		return fmt.Errorf("failed to delete meeting: %w", err)
+	}
+
+	return nil
+}
