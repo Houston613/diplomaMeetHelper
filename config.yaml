@@ -1,0 +1,22 @@
+app:
+  workers: 3
+  job_timeout: "120s"
+
+db:
+  dsn: "postgres://postgres:postgrespassword@localhost:5432/meethelper?sslmode=disable&search_path=meethelper"
+
+speech:
+  provider: "mock"
+  mock:
+    delay: "500ms"
+    error_rate: 0
+
+llm:
+  provider: "mock"
+  mock:
+    delay: "500ms"
+    error_rate: 0
+
+log:
+  level: "info"
+  format: "console"
