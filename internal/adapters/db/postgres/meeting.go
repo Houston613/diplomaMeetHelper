@@ -23,48 +23,44 @@ func NewMeetingRepository(pool *pgxpool.Pool) *MeetingRepository {
 }
 
 func (r *MeetingRepository) CreateMeetingWithJob(ctx context.Context, meeting *domain.Meeting, job *domain.ProcessingJob) error {
-	tx, err := r.pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to begin transaction: %w", err)
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-
-	queryMeeting := `
+	return InTx(ctx, r.pool, func(tx pgx.Tx) error {
+		queryMeeting := `
 INSERT INTO meethelper.meetings (id, user_id, filename, file_path, status, created_at, updated_at)
     VALUES ($1, $2, $3, $4, $5, $6, $7);
-	`
-	_, err = tx.Exec(ctx, queryMeeting,
-		meeting.ID,
-		meeting.UserID,
-		meeting.Filename,
-		meeting.FilePath,
-		meeting.Status,
-		meeting.CreatedAt,
-		meeting.UpdatedAt,
-	)
-	if err != nil {
-		return fmt.Errorf("failed to insert meeting: %w", err)
-	}
+		`
+		_, err := tx.Exec(ctx, queryMeeting,
+			meeting.ID,
+			meeting.UserID,
+			meeting.Filename,
+			meeting.FilePath,
+			meeting.Status,
+			meeting.CreatedAt,
+			meeting.UpdatedAt,
+		)
+		if err != nil {
+			return fmt.Errorf("failed to insert meeting: %w", err)
+		}
 
-	queryJob := `
+		queryJob := `
 INSERT INTO meethelper.processing_jobs (id, meeting_id, user_id, status, error_message, retry_count, created_at, updated_at)
     VALUES ($1, $2, $3, $4, $5, $6, $7, $8);
-	`
-	_, err = tx.Exec(ctx, queryJob,
-		job.ID,
-		job.MeetingID,
-		job.UserID,
-		job.Status,
-		job.ErrorMessage,
-		job.RetryCount,
-		job.CreatedAt,
-		job.UpdatedAt,
-	)
-	if err != nil {
-		return fmt.Errorf("failed to insert processing job: %w", err)
-	}
+		`
+		_, err = tx.Exec(ctx, queryJob,
+			job.ID,
+			job.MeetingID,
+			job.UserID,
+			job.Status,
+			job.ErrorMessage,
+			job.RetryCount,
+			job.CreatedAt,
+			job.UpdatedAt,
+		)
+		if err != nil {
+			return fmt.Errorf("failed to insert processing job: %w", err)
+		}
 
-	return tx.Commit(ctx)
+		return nil
+	})
 }
 
 func (r *MeetingRepository) GetMeeting(ctx context.Context, meetingID uuid.UUID, userID string) (*domain.Meeting, error) {

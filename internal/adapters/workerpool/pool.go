@@ -126,4 +126,3 @@ func (wp *WorkerPool) Stop(gracefulTimeout time.Duration) {
 		<-done
 	}
 }
-

@@ -319,5 +319,3 @@ func TestCLI_EnsureUser_Error(t *testing.T) {
 		t.Errorf("unexpected error message: %v", err)
 	}
 }
-
-

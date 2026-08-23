@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"diplomaMeetHelper/internal/domain"
 
@@ -20,6 +21,12 @@ func NewSearchRepository(pool *pgxpool.Pool) *SearchRepository {
 }
 
 func (r *SearchRepository) Search(ctx context.Context, userID string, query string) ([]domain.SearchResult, error) {
+	cleanQuery := strings.TrimSpace(query)
+	cleanQuery = strings.ReplaceAll(cleanQuery, "\x00", "")
+	if cleanQuery == "" {
+		return nil, domain.ErrEmptySearchQuery
+	}
+
 	sqlQuery := `
 SELECT
     m.id,
@@ -52,10 +59,9 @@ WHERE
     AND s.tsv @@ plainto_tsquery('russian', $2)
 ORDER BY
     rank DESC;
-
 	`
 
-	rows, err := r.pool.Query(ctx, sqlQuery, userID, query)
+	rows, err := r.pool.Query(ctx, sqlQuery, userID, cleanQuery)
 	if err != nil {
 		return nil, fmt.Errorf("failed to execute full-text search: %w", err)
 	}
