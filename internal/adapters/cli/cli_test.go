@@ -3,6 +3,7 @@ package cli_test
 import (
 	"bytes"
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -297,4 +298,26 @@ func TestCLI_ListCommand(t *testing.T) {
 		t.Errorf("expected output to contain summary snippet, got: %s", output)
 	}
 }
+
+func TestCLI_EnsureUser_Error(t *testing.T) {
+	mockUser := &mockUserService{
+		ensureUserFn: func(ctx context.Context, userID string) (*domain.User, bool, error) {
+			return nil, false, errors.New("db error")
+		},
+	}
+
+	handler := cli.NewHandler(mockUser, &mockMeetingService{}, &mockSearchService{}, &mockChatService{}, zap.NewNop())
+	var outBuf, errBuf bytes.Buffer
+	handler.SetOutput(&outBuf, &errBuf)
+
+	err := handler.Execute(context.Background(), []string{"list", "-u", "alex"})
+	if err == nil {
+		t.Fatal("expected error from EnsureUser middleware, got nil")
+	}
+
+	if !strings.Contains(err.Error(), "ошибка проверки/регистрации пользователя") {
+		t.Errorf("unexpected error message: %v", err)
+	}
+}
+
 

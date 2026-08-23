@@ -5,13 +5,12 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 
 	"diplomaMeetHelper/internal/adapters/cli"
 	"diplomaMeetHelper/internal/adapters/db/postgres"
-	mockLLM "diplomaMeetHelper/internal/adapters/llm/mock"
-	mockSpeech "diplomaMeetHelper/internal/adapters/speech/mock"
+	"diplomaMeetHelper/internal/adapters/llm"
+	"diplomaMeetHelper/internal/adapters/speech"
 	"diplomaMeetHelper/internal/adapters/workerpool"
 	"diplomaMeetHelper/internal/config"
 	"diplomaMeetHelper/internal/domain"
@@ -66,26 +65,15 @@ func Run(parentCtx context.Context) error {
 	qaRepo := postgres.NewQARepository(dbPool)
 
 	// External Speech Client
-	var speechClient usecase.SpeechClient
-	switch strings.ToLower(cfg.Speech.Provider) {
-	case "mock":
-		speechClient = mockSpeech.NewSpeechClient(cfg.Speech.Mock.Delay, cfg.Speech.Mock.ErrorRate)
-	default:
-		return fmt.Errorf("unsupported speech provider: %q (supported: mock)", cfg.Speech.Provider)
+	speechClient, err := speech.NewClient(cfg.Speech)
+	if err != nil {
+		return fmt.Errorf("failed to initialize speech client: %w", err)
 	}
 
 	// External LLM Client
-	type fullLLMClient interface {
-		usecase.LLMClient
-		usecase.ChatLLMClient
-	}
-
-	var llmClient fullLLMClient
-	switch strings.ToLower(cfg.LLM.Provider) {
-	case "mock":
-		llmClient = mockLLM.NewLLMClient(cfg.LLM.Mock.Delay, cfg.LLM.Mock.ErrorRate)
-	default:
-		return fmt.Errorf("unsupported LLM provider: %q (supported: mock)", cfg.LLM.Provider)
+	llmClient, err := llm.NewClient(cfg.LLM)
+	if err != nil {
+		return fmt.Errorf("failed to initialize LLM client: %w", err)
 	}
 
 	// Worker Pool

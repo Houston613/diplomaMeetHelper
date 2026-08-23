@@ -85,28 +85,27 @@ func (h *Handler) SetOutput(out io.Writer, errOut io.Writer) {
 	h.rootCmd.SetErr(errOut)
 }
 
+func (h *Handler) requireUserIDMiddleware(cmd *cobra.Command, args []string) error {
+	if strings.TrimSpace(h.userID) == "" {
+		return errors.New("ошибка: флаг --user-id обязателен для выполнения команды")
+	}
+	return nil
+}
+
+func (h *Handler) requireUserMiddleware(cmd *cobra.Command, args []string) error {
+	if err := h.requireUserIDMiddleware(cmd, args); err != nil {
+		return err
+	}
+	if _, _, err := h.userService.EnsureUser(cmd.Context(), h.userID); err != nil {
+		return fmt.Errorf("ошибка проверки/регистрации пользователя: %w", err)
+	}
+	return nil
+}
+
 func (h *Handler) initCommands() {
 	h.rootCmd = &cobra.Command{
-		Use:   "diplomaMeetHelper",
-		Short: "Помощник для обработки и анализа встреч",
-		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-			if cmd.Name() == "help" || cmd.Name() == "version" || cmd.Name() == "completion" || (cmd.Name() == "diplomaMeetHelper" && len(args) == 0) {
-				return nil
-			}
-
-			if strings.TrimSpace(h.userID) == "" {
-				return errors.New("ошибка: флаг --user-id обязателен для выполнения команды")
-			}
-
-			if cmd.Name() != "start" {
-				_, _, err := h.userService.EnsureUser(cmd.Context(), h.userID)
-				if err != nil {
-					return fmt.Errorf("ошибка проверки/регистрации пользователя: %w", err)
-				}
-			}
-
-			return nil
-		},
+		Use:           "diplomaMeetHelper",
+		Short:         "Помощник для обработки и анализа встреч",
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}
@@ -128,8 +127,9 @@ func (h *Handler) initCommands() {
 
 func (h *Handler) newStartCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "start",
-		Short: "Регистрация или приветствие пользователя",
+		Use:     "start",
+		Short:   "Регистрация или приветствие пользователя",
+		PreRunE: h.requireUserIDMiddleware,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			user, created, err := h.userService.EnsureUser(cmd.Context(), h.userID)
 			if err != nil {
@@ -149,9 +149,10 @@ func (h *Handler) newStartCmd() *cobra.Command {
 
 func (h *Handler) newLoadCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "load <file_path>",
-		Short: "Загрузка аудиозаписи или текстового файла встречи на обработку",
-		Args:  cobra.ExactArgs(1),
+		Use:     "load <file_path>",
+		Short:   "Загрузка аудиозаписи или текстового файла встречи на обработку",
+		Args:    cobra.ExactArgs(1),
+		PreRunE: h.requireUserMiddleware,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			filePath := args[0]
 			meetingID, err := h.meetingService.LoadMeeting(cmd.Context(), h.userID, filePath)
@@ -167,9 +168,10 @@ func (h *Handler) newLoadCmd() *cobra.Command {
 
 func (h *Handler) newStatusCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "status <meeting_id>",
-		Short: "Получение статуса обработки встречи",
-		Args:  cobra.ExactArgs(1),
+		Use:     "status <meeting_id>",
+		Short:   "Получение статуса обработки встречи",
+		Args:    cobra.ExactArgs(1),
+		PreRunE: h.requireUserMiddleware,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			meetingID, err := uuid.Parse(args[0])
 			if err != nil {
@@ -200,8 +202,9 @@ func (h *Handler) newStatusCmd() *cobra.Command {
 
 func (h *Handler) newListCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "list",
-		Short: "Вывод списка сохраненных встреч пользователя",
+		Use:     "list",
+		Short:   "Вывод списка сохраненных встреч пользователя",
+		PreRunE: h.requireUserMiddleware,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			items, err := h.meetingService.ListMeetings(cmd.Context(), h.userID)
 			if err != nil {
@@ -243,9 +246,10 @@ func (h *Handler) newListCmd() *cobra.Command {
 
 func (h *Handler) newGetCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "get <meeting_id>",
-		Short: "Получение полной информации, расшифровки и выжимки встречи",
-		Args:  cobra.ExactArgs(1),
+		Use:     "get <meeting_id>",
+		Short:   "Получение полной информации, расшифровки и выжимки встречи",
+		Args:    cobra.ExactArgs(1),
+		PreRunE: h.requireUserMiddleware,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			meetingID, err := uuid.Parse(args[0])
 			if err != nil {
@@ -278,9 +282,10 @@ func (h *Handler) newGetCmd() *cobra.Command {
 
 func (h *Handler) newFindCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "find <query>",
-		Short: "Полнотекстовый поиск по расшифровкам и выжимкам встреч",
-		Args:  cobra.MinimumNArgs(1),
+		Use:     "find <query>",
+		Short:   "Полнотекстовый поиск по расшифровкам и выжимкам встреч",
+		Args:    cobra.MinimumNArgs(1),
+		PreRunE: h.requireUserMiddleware,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			query := strings.Join(args, " ")
 			results, err := h.searchService.Search(cmd.Context(), h.userID, query)
@@ -313,8 +318,9 @@ func (h *Handler) newFindCmd() *cobra.Command {
 
 func (h *Handler) newChatCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "chat [question...]",
-		Short: "Интерактивный вопрос к LLM по контексту встречи",
+		Use:     "chat [question...]",
+		Short:   "Интерактивный вопрос к LLM по контексту встречи",
+		PreRunE: h.requireUserMiddleware,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			var meetingID uuid.UUID
 			var question string
@@ -353,9 +359,10 @@ func (h *Handler) newChatCmd() *cobra.Command {
 
 func (h *Handler) newRetryCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "retry <meeting_id>",
-		Short: "Повторная обработка встречи в случае сбоя",
-		Args:  cobra.ExactArgs(1),
+		Use:     "retry <meeting_id>",
+		Short:   "Повторная обработка встречи в случае сбоя",
+		Args:    cobra.ExactArgs(1),
+		PreRunE: h.requireUserMiddleware,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			meetingID, err := uuid.Parse(args[0])
 			if err != nil {
@@ -375,9 +382,10 @@ func (h *Handler) newRetryCmd() *cobra.Command {
 
 func (h *Handler) newDeleteCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "delete <meeting_id>",
-		Short: "Удаление встречи и всех связанных данных",
-		Args:  cobra.ExactArgs(1),
+		Use:     "delete <meeting_id>",
+		Short:   "Удаление встречи и всех связанных данных",
+		Args:    cobra.ExactArgs(1),
+		PreRunE: h.requireUserMiddleware,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			meetingID, err := uuid.Parse(args[0])
 			if err != nil {
